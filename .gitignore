@@ -2,5 +2,8 @@
 *.DS_Store
 *.egg-info
 artifacts/
+
 predSeq/
 results/
+mydata/
+Logs/
