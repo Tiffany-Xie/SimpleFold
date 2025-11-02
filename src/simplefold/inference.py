@@ -288,6 +288,8 @@ def predict_structures_from_fastas(args):
 
     for struct_file in output_dir.glob("structures/*.npz"):
         record_file = output_dir / "records" / f"{struct_file.stem}.json"
+        
+        print(f"*** Starting {struct_file.stem} Prediction ... ***")
 
         # prepare the target protein data for inference
         batch, structure, record = process_one_inference_structure(
@@ -315,3 +317,5 @@ def predict_structures_from_fastas(args):
                 output_format=args.output_format,
                 plddts=plddts[i] if plddts is not None else None
             )
+
+        print('-----------------------------------------------------------')
