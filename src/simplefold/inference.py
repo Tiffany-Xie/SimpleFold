@@ -14,6 +14,8 @@ from pathlib import Path
 from itertools import starmap
 import lightning.pytorch as pl
 
+import csv, time, datetime
+
 from model.flow import LinearPath
 from model.torch.sampler import EMSampler
 
@@ -257,8 +259,9 @@ def predict_structures_from_fastas(args):
     output_dir.mkdir(parents=True, exist_ok=True)
     prediction_dir = output_dir / f"predictions_{args.simplefold_model}"
     prediction_dir.mkdir(parents=True, exist_ok=True)
-    cache = output_dir / "cache"
-    cache.mkdir(parents=True, exist_ok=True)
+    #cache = output_dir / "cache"
+    cache = Path('/hpf/projects/mtyers/ningrui/SimpleFold/cache')
+    #cache.mkdir(parents=True, exist_ok=True)
 
     # set random seed for reproducibility
     pl.seed_everything(args.seed, workers=True)
@@ -285,11 +288,26 @@ def predict_structures_from_fastas(args):
         out_dir=output_dir,
         ccd_path=cache / "ccd.pkl",
     )
+    
+    timings_csv = prediction_dir / "timings.csv"
+
+    def _append_timing(row):
+
+        header = ["PDB_ID","num_steps","tau","nsample_per_protein","backend","duration"]
+        
+        new_file = not timings_csv.exists()
+        with open(timings_csv, "a", newline="") as f:
+            w = csv.writer(f)
+            if new_file:
+                w.writerow(header)
+            w.writerow(row)
 
     for struct_file in output_dir.glob("structures/*.npz"):
         record_file = output_dir / "records" / f"{struct_file.stem}.json"
         
         print(f"*** Starting {struct_file.stem} Prediction ... ***")
+
+        t0 = time.perf_counter()
 
         # prepare the target protein data for inference
         batch, structure, record = process_one_inference_structure(
@@ -317,5 +335,9 @@ def predict_structures_from_fastas(args):
                 output_format=args.output_format,
                 plddts=plddts[i] if plddts is not None else None
             )
+
+        t_duration = time.perf_counter() - t0
+        _append_timing([f"{struct_file.stem}", args.num_steps, args.tau, args.nsample_per_protein,
+                        args.backend, t_duration])
 
         print('-----------------------------------------------------------')

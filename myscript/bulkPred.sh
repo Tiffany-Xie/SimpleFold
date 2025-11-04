@@ -43,7 +43,7 @@ while [[ $# -gt 0 ]]; do
     --nsample|-s)   NSAMPLE="${2:?}"; shift 2 ;;
     --run_name|-r)  RUN_NAME="${2:?}"; shift 2 ;;
     --seed|-S)      SEED="${2:?}"; shift 2 ;;
-    --format|-f)    FORMAT="${2:?}"; shift 2 ;
+    --format|-F)    FORMAT="${2:?}"; shift 2 ;;
     -h|--help)      usage; exit 0 ;;
     *) echo "(x) Unknown flag: $1"; usage; exit 2 ;;
   esac
@@ -69,6 +69,7 @@ echo "n steps: $NSTEPS"
 echo "tau: $TAU"
 echo "n sample: $NSAMPLE"
 echo "Seed: $SEED"
+echo "Output format: $FORMAT"
 echo
 
 mkdir -p "${OUT_PATH}"
@@ -85,14 +86,16 @@ simplefold \
   --num_steps "$NSTEPS" --tau "$TAU" \
   --nsample_per_protein "$NSAMPLE" \
   --plddt \
-  --fasta_path "$FASTA_PATH" \
+  --fasta_path "$FASTA_DIR" \
   --output_dir "$OUT_PATH" \
-  --output_format $FORMAT
+  --output_format $FORMAT \
   --backend "$BACKEND" || true
 
-done
 
-echo "ALL DONE! Results -> $OUT_CSV"
+echo "ALL DONE! Results -> $OUT_PATH"
+
+cp -f "./Logs/simplefold_${SLURM_JOB_ID}.log" \
+    "$MAIN/results/${RUN_NAME}/simplefold_${SLURM_JOB_ID}.log"
 
 
 
