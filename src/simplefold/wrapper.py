@@ -206,6 +206,7 @@ class InferenceWrapper:
         tau,
         device,
         backend,
+        cache_dir=None,
     ):
         self.num_steps = num_steps
         self.nsample_per_protein = nsample_per_protein
@@ -221,9 +222,11 @@ class InferenceWrapper:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # create cache directory
-        cache = output_dir / "cache"
+        # Keep reusable reference data separate from per-run intermediate files.
+        cache = Path(cache_dir).expanduser() if cache_dir else Path.home() / ".cache/simplefold"
         cache.mkdir(parents=True, exist_ok=True)
+        work_dir = output_dir / "cache"
+        work_dir.mkdir(parents=True, exist_ok=True)
 
         # create prediction directory
         prediction_dir = output_dir / prediction_dir
@@ -231,6 +234,7 @@ class InferenceWrapper:
 
         self.output_dir = output_dir
         self.cache = cache
+        self.work_dir = work_dir
         self.prediction_dir = prediction_dir
 
         self.initialize_esm_model()
@@ -294,18 +298,18 @@ class InferenceWrapper:
         # process fasta files to input format
         download_fasta_utilities(self.cache)
         # save the input sequence to a fasta file
-        with open(self.cache / "input.fasta", "w") as f:
+        with open(self.work_dir / "input.fasta", "w") as f:
             f.write(f">A|Protein\n{aa_seq}\n")
-        data = [self.cache / "input.fasta"]
+        data = [self.work_dir / "input.fasta"]
         process_fastas(
             data=data,
-            out_dir=self.cache,
+            out_dir=self.work_dir,
             ccd_path=self.cache / "ccd.pkl",
         )
 
         # prepare the target protein data for inference
-        struct_file = self.cache / "structures" / "input.npz"
-        record_file = self.cache / "records" / "input.json"
+        struct_file = self.work_dir / "structures" / "input.npz"
+        record_file = self.work_dir / "records" / "input.json"
         batch, structure, record = process_one_inference_structure(
             struct_file,
             record_file,

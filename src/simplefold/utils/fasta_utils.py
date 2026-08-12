@@ -18,9 +18,6 @@ from boltz_data_pipeline.types import Manifest, Record
 
 
 CCD_URL = "https://huggingface.co/boltz-community/boltz-1/resolve/main/ccd.pkl"
-MODEL_URL = (
-    "https://huggingface.co/boltz-community/boltz-1/resolve/main/boltz1_conf.ckpt"
-)
 
 
 from collections.abc import Mapping
@@ -114,7 +111,7 @@ def check_fasta_inputs(data: Path) -> list[Path]:
 
 
 def download_fasta_utilities(cache: Path) -> None:
-    """Download all the required data.
+    """Download the chemical component dictionary used for FASTA parsing.
 
     Parameters
     ----------
@@ -122,23 +119,18 @@ def download_fasta_utilities(cache: Path) -> None:
         The cache directory.
 
     """
-    # Download CCD
+    cache.mkdir(parents=True, exist_ok=True)
     ccd = cache / "ccd.pkl"
     if not ccd.exists():
         click.echo(
-            f"Downloading the CCD dictionary to {ccd}. You may "
-            "change the cache directory with the --cache flag."
+            f"Downloading the CCD dictionary to {ccd}."
         )
-        urllib.request.urlretrieve(CCD_URL, str(ccd))
-
-    # Download model
-    model = cache / "boltz1_conf.ckpt"
-    if not model.exists():
-        click.echo(
-            f"Downloading the model weights to {model}. You may "
-            "change the cache directory with the --cache flag."
-        )
-        urllib.request.urlretrieve(MODEL_URL, str(model))
+        partial = ccd.with_suffix(".pkl.part")
+        try:
+            urllib.request.urlretrieve(CCD_URL, str(partial))
+            partial.replace(ccd)
+        finally:
+            partial.unlink(missing_ok=True)
 
 
 def process_fastas(
