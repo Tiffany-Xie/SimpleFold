@@ -1,0 +1,25 @@
+[2026-08-18 13:20:55,243][__main__][INFO] - [rank: 0] Instantiating model <simplerfold.simplefold_compat.ResumeCompatibleSimpleFold>
+[2026-08-18 13:21:36,986][__main__][INFO] - [rank: 0] Resuming from checkpoint </project/6105017/ningrui/simplerfold/workspace/runs/02_tiny_overfit/multi-protein-20260817-175824/artifacts/checkpoints/last.ckpt>...
+[2026-08-18 13:22:08,113][__main__][INFO] - [rank: 0] Instantiating datamodule <datasets.train_datamodule.SimpleFoldTrainingDataModule>
+[2026-08-18 13:22:08,182][__main__][INFO] - [rank: 0] Instantiating callbacks...
+[2026-08-18 13:22:08,183][utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.ModelCheckpoint>
+[2026-08-18 13:22:08,190][utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.RichModelSummary>
+[2026-08-18 13:22:08,190][utils.instantiators][INFO] - [rank: 0] Instantiating callback <simplerfold.training_diagnostics.FixedTrainingProbe>
+[2026-08-18 13:22:08,194][__main__][INFO] - [rank: 0] Instantiating loggers...
+[2026-08-18 13:22:08,195][utils.instantiators][INFO] - [rank: 0] Instantiating logger <lightning.pytorch.loggers.CSVLogger>
+[2026-08-18 13:22:08,195][__main__][INFO] - [rank: 0] Instantiating trainer <lightning.pytorch.trainer.Trainer>
+[2026-08-18 13:22:08,286][__main__][INFO] - [rank: 0] Logging hyperparameters!
+[2026-08-18 13:22:08,331][__main__][INFO] - [rank: 0] Starting training!
+[2026-08-18 15:18:39,094][__main__][INFO] - [rank: 0] Instantiating model <simplerfold.simplefold_compat.ResumeCompatibleSimpleFold>
+[2026-08-18 15:19:20,145][__main__][INFO] - [rank: 0] Resuming from checkpoint </project/6105017/ningrui/simplerfold/workspace/runs/02_tiny_overfit/multi-protein-20260817-175824/artifacts/checkpoints/last.ckpt>...
+[2026-08-18 15:19:52,185][__main__][INFO] - [rank: 0] Instantiating datamodule <datasets.train_datamodule.SimpleFoldTrainingDataModule>
+[2026-08-18 15:19:52,271][__main__][INFO] - [rank: 0] Instantiating callbacks...
+[2026-08-18 15:19:52,272][utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.ModelCheckpoint>
+[2026-08-18 15:19:52,285][utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.RichModelSummary>
+[2026-08-18 15:19:52,286][utils.instantiators][INFO] - [rank: 0] Instantiating callback <simplerfold.training_diagnostics.FixedTrainingProbe>
+[2026-08-18 15:19:52,290][__main__][INFO] - [rank: 0] Instantiating loggers...
+[2026-08-18 15:19:52,290][utils.instantiators][INFO] - [rank: 0] Instantiating logger <lightning.pytorch.loggers.CSVLogger>
+[2026-08-18 15:19:52,291][__main__][INFO] - [rank: 0] Instantiating trainer <lightning.pytorch.trainer.Trainer>
+[2026-08-18 15:19:52,420][__main__][INFO] - [rank: 0] Logging hyperparameters!
+[2026-08-18 15:19:52,463][__main__][INFO] - [rank: 0] Starting training!
+[2026-08-18 17:36:46,053][utils.utils][INFO] - [rank: 0] Output dir: /project/6105017/ningrui/simplerfold/workspace/runs/02_tiny_overfit/multi-protein-resume-20260818-151723/artifacts/

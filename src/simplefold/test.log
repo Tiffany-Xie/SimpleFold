@@ -1,0 +1,10 @@
+[2026-08-18 21:52:49,149][__main__][INFO] - [rank: 0] Instantiating model <simplerfold.simplefold_compat.LiveWeightsInferenceSimpleFold>
+[2026-08-18 21:54:26,089][__main__][INFO] - [rank: 0] Instantiating datamodule <datasets.test_datamodule.SimpleFoldInferenceDataModule>
+[2026-08-18 21:54:26,256][__main__][INFO] - [rank: 0] Instantiating callbacks...
+[2026-08-18 21:54:26,257][utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.ModelCheckpoint>
+[2026-08-18 21:54:26,262][utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.RichModelSummary>
+[2026-08-18 21:54:26,262][__main__][INFO] - [rank: 0] Instantiating trainer <lightning.pytorch.trainer.Trainer>
+[2026-08-18 21:54:26,344][__main__][INFO] - [rank: 0] Logging hyperparameters!
+[2026-08-18 21:54:26,346][utils.logging_utils][WARNING] - [rank: 0] Logger not found! Skipping hyperparameter logging...
+[2026-08-18 21:54:26,346][__main__][INFO] - [rank: 0] Starting evaluation!
+[2026-08-18 21:57:21,374][utils.utils][INFO] - [rank: 0] Output dir: /project/6105017/ningrui/simplerfold/workspace/runs/02_tiny_overfit/multi-protein-resume-20260818-151723/.postprocess.xzz26g/sample/artifacts/

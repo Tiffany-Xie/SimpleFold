@@ -125,6 +125,7 @@ class SimpleFold(pl.LightningModule):
         if self.use_esm:
             self.esm_model, self.esm_dict = esm_registry[esm_model]()
             self.esm_model.eval()
+            self.esm_model.requires_grad_(False)  # frozen conditioning, no grads
             self.af2_to_esm = _af2_to_esm(self.esm_dict)
             print(f"Using ESM model: {esm_model}")
         else:
@@ -614,6 +615,7 @@ class SimpleFold(pl.LightningModule):
     def reset_esm(self, esm_model: str):
         self.esm_model, self.esm_dict = esm_registry[esm_model]()
         self.esm_model.eval()
+        self.esm_model.requires_grad_(False)  # frozen conditioning, no grads
         self.af2_to_esm = _af2_to_esm(self.esm_dict)
         self.esm_model = self.esm_model.to(self.device)
         self.af2_to_esm = self.af2_to_esm.to(self.device)

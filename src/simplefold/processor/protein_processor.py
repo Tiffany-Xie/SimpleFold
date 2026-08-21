@@ -43,6 +43,7 @@ class ProteinDataProcessor:
         else:
             raise ValueError(f"Unsupported backend: {self.backend}. Choose 'torch' or 'mlx'.")
 
+    @torch.no_grad()
     def process_esm(
         self, 
         batch, 
@@ -51,6 +52,13 @@ class ProteinDataProcessor:
         af2_to_esm=None,
         inference=False,
     ):
+        """Write frozen ESM2 per-residue features into ``batch["esm_s"]``.
+
+        ``no_grad`` is load-bearing, not cosmetic: ESM is never trained, but
+        without it the forward pass records every one of its 37 layers of
+        activations in the autograd graph just for the ``.detach()`` below to
+        throw them away -- a large peak-memory cost for identical numerics.
+        """
         sequence = batch["aa_seq"]
         B = len(sequence)
         L = batch["res_type"].shape[1]
