@@ -9,16 +9,14 @@
 import click
 import pickle
 import json
-import urllib.request
 from pathlib import Path
 from tqdm import tqdm
 from dataclasses import asdict
 
-from boltz_data_pipeline.types import Manifest, Record
+from simplefold.boltz_data_pipeline.types import Manifest, Record
 
 
-CCD_URL = "https://huggingface.co/boltz-community/boltz-1/resolve/main/ccd.pkl"
-
+from simplefold.assets import resource
 
 from collections.abc import Mapping
 from pathlib import Path
@@ -26,8 +24,8 @@ from pathlib import Path
 from Bio import SeqIO
 from rdkit.Chem.rdchem import Mol
 
-from boltz_data_pipeline.parse.yaml import parse_boltz_schema
-from boltz_data_pipeline.types import Target
+from simplefold.boltz_data_pipeline.parse.yaml import parse_boltz_schema
+from simplefold.boltz_data_pipeline.types import Target
 
 
 def parse_fasta(path: Path, ccd: Mapping[str, Mol]) -> Target:  # noqa: C901
@@ -119,18 +117,7 @@ def download_fasta_utilities(cache: Path) -> None:
         The cache directory.
 
     """
-    cache.mkdir(parents=True, exist_ok=True)
-    ccd = cache / "ccd.pkl"
-    if not ccd.exists():
-        click.echo(
-            f"Downloading the CCD dictionary to {ccd}."
-        )
-        partial = ccd.with_suffix(".pkl.part")
-        try:
-            urllib.request.urlretrieve(CCD_URL, str(partial))
-            partial.replace(ccd)
-        finally:
-            partial.unlink(missing_ok=True)
+    resource(cache, 'ccd.pkl')
 
 
 def process_fastas(

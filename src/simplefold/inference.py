@@ -3,51 +3,39 @@
 # Copyright (c) 2025 Apple Inc. Licensed under MIT License.
 #
 
-import os
 import torch
 import hydra
 import omegaconf
-import argparse
-import numpy as np
 from copy import deepcopy
 from pathlib import Path
 from itertools import starmap
 import lightning.pytorch as pl
 from importlib import resources
 
-from model.flow import LinearPath
-from model.torch.sampler import EMSampler
+from simplefold.assets import load_model, resource
+from simplefold.conditioning import Conditioner, load_esm
+from simplefold.boltz_data_pipeline.types import Manifest
+from simplefold.model.flow import LinearPath
+from simplefold.model.torch.sampler import EMSampler
 
-from processor.protein_processor import ProteinDataProcessor
-from utils.datamodule_utils import process_one_inference_structure
-from utils.esm_utils import _af2_to_esm, esm_registry
-from utils.boltz_utils import process_structure, save_structure
-from utils.fasta_utils import process_fastas, download_fasta_utilities, check_fasta_inputs
-from boltz_data_pipeline.feature.featurizer import BoltzFeaturizer
-from boltz_data_pipeline.tokenize.boltz_protein import BoltzTokenizer
+from simplefold.processor.protein_processor import ProteinDataProcessor
+from simplefold.utils.datamodule_utils import process_one_inference_structure
+from simplefold.utils.esm_utils import _af2_to_esm, esm_registry
+from simplefold.utils.boltz_utils import process_structure, save_structure
+from simplefold.utils.fasta_utils import process_fastas, download_fasta_utilities, check_fasta_inputs
+from simplefold.boltz_data_pipeline.feature.featurizer import BoltzFeaturizer
+from simplefold.boltz_data_pipeline.tokenize.boltz_protein import BoltzTokenizer
 
 try: 
     import mlx.core as mx
-    from mlx.utils import tree_unflatten, tree_flatten
-    from model.mlx.sampler import EMSampler as EMSamplerMLX
-    from model.mlx.esm_network import ESM2 as ESM2MLX
-    from utils.mlx_utils import map_torch_to_mlx, map_plddt_torch_to_mlx
+    from mlx.utils import tree_unflatten
+    from simplefold.model.mlx.sampler import EMSampler as EMSamplerMLX
+    from simplefold.model.mlx.esm_network import ESM2 as ESM2MLX
+    from simplefold.utils.mlx_utils import map_torch_to_mlx, map_plddt_torch_to_mlx
     MLX_AVAILABLE = True
 except:
     MLX_AVAILABLE = False
     print("MLX not installed, skip importing MLX related packages.")
-
-
-ckpt_url_dict = {
-    "simplefold_100M": "https://ml-site.cdn-apple.com/models/simplefold/simplefold_100M.ckpt",
-    "simplefold_360M": "https://ml-site.cdn-apple.com/models/simplefold/simplefold_360M.ckpt",
-    "simplefold_700M": "https://ml-site.cdn-apple.com/models/simplefold/simplefold_700M.ckpt",
-    "simplefold_1.1B": "https://ml-site.cdn-apple.com/models/simplefold/simplefold_1.1B.ckpt",
-    "simplefold_1.6B": "https://ml-site.cdn-apple.com/models/simplefold/simplefold_1.6B.ckpt",
-    "simplefold_3B": "https://ml-site.cdn-apple.com/models/simplefold/simplefold_3B.ckpt",
-}
-
-plddt_ckpt_url = "https://ml-site.cdn-apple.com/models/simplefold/plddt_module_1.6B.ckpt"
 
 
 def get_config_path(relative_path):
@@ -75,40 +63,21 @@ def get_config_path(relative_path):
 
 
 def initialize_folding_model(args):
-    # define folding model
     simplefold_model = args.simplefold_model
-
-    # create checkpoint directory
-    ckpt_dir = Path(args.ckpt_dir)
-    ckpt_path = os.path.join(ckpt_dir, f"{simplefold_model}.ckpt")
-
-    # create folding model
-    ckpt_path = os.path.join(ckpt_dir, f"{simplefold_model}.ckpt")
-    if not os.path.exists(ckpt_path):
-        os.makedirs(ckpt_dir, exist_ok=True)
-        os.system(f"curl -L {ckpt_url_dict[simplefold_model]} -o {ckpt_path}")
-    cfg_path = get_config_path(f"configs/model/architecture/foldingdit_{simplefold_model[11:]}.yaml")
-
-    checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-
-    # load model checkpoint
+    scale = simplefold_model.removeprefix('simplefold_')
     if args.backend == 'torch':
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model_config = omegaconf.OmegaConf.load(cfg_path)
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model = load_model(scale, args.ckpt_dir, device)
+    else:
+        device = 'cpu'
+        path = resource(args.ckpt_dir, simplefold_model + '.ckpt')
+        checkpoint = torch.load(path, map_location='cpu', weights_only=True)
+        cfg_path = get_config_path(f'configs/model/architecture/foldingdit_{scale}.yaml')
+        with open(cfg_path) as f:
+            model_config = omegaconf.OmegaConf.create(f.read().replace('torch', 'mlx'))
         model = hydra.utils.instantiate(model_config)
-        model.load_state_dict(checkpoint, strict=True)
-        model = model.to(device)
-    elif args.backend == 'mlx':
-        device = "cpu"
-        # replace torch implementations with mlx
-        with open(cfg_path, "r") as f:
-            yaml_str = f.read()
-        yaml_str = yaml_str.replace('torch', 'mlx')
-
-        model_config = omegaconf.OmegaConf.create(yaml_str)
-        model = hydra.utils.instantiate(model_config)
-        mlx_state_dict = {k: mx.array(v) for k, v in starmap(map_torch_to_mlx, checkpoint.items()) if k is not None}
-        model.update(tree_unflatten(list(mlx_state_dict.items())))
+        state = {k: mx.array(v) for k, v in starmap(map_torch_to_mlx, checkpoint.items()) if k is not None}
+        model.update(tree_unflatten(list(state.items())))
     print(f"Folding model {simplefold_model} loaded.")
     print(f"Using device: {device}.")
 
@@ -121,11 +90,7 @@ def initialize_plddt_module(args, device):
         return None, None
 
     # load pLDDT module if specified
-    plddt_ckpt_path = os.path.join(args.ckpt_dir, "plddt.ckpt")
-    if not os.path.exists(plddt_ckpt_path):
-        os.makedirs(args.ckpt_dir, exist_ok=True)
-        os.system(f"curl -L {plddt_ckpt_url} -o {plddt_ckpt_path}")
-
+    plddt_ckpt_path = resource(args.ckpt_dir, 'plddt.ckpt')
     plddt_module_path = get_config_path("configs/model/architecture/plddt_module.yaml")
     plddt_checkpoint = torch.load(plddt_ckpt_path, map_location="cpu", weights_only=False)
 
@@ -149,11 +114,7 @@ def initialize_plddt_module(args, device):
     plddt_out_module.eval()
     print(f"pLDDT output module loaded with {args.backend} backend.")
 
-    plddt_latent_ckpt_path = os.path.join(args.ckpt_dir, "simplefold_1.6B.ckpt")
-    if not os.path.exists(plddt_latent_ckpt_path):
-        os.makedirs(args.ckpt_dir, exist_ok=True)
-        os.system(f"curl -L {ckpt_url_dict['simplefold_1.6B']} -o {plddt_latent_ckpt_path}")
-
+    plddt_latent_ckpt_path = resource(args.ckpt_dir, 'simplefold_1.6B.ckpt')
     plddt_latent_config_path = get_config_path("configs/model/architecture/foldingdit_1.6B.yaml")
     plddt_latent_checkpoint = torch.load(plddt_latent_ckpt_path, map_location="cpu", weights_only=False)
 
@@ -180,20 +141,18 @@ def initialize_plddt_module(args, device):
 
 
 def initialize_esm_model(args, device):
+    if args.backend == 'torch':
+        return load_esm(args.ckpt_dir, device)
     # load ESM2 model
     esm_model, esm_dict = esm_registry["esm2_3B"]()
     af2_to_esm = _af2_to_esm(esm_dict)
 
-    if args.backend == 'torch':
-        esm_model = esm_model.to(device)
-        af2_to_esm = af2_to_esm.to(device)
-    elif args.backend == 'mlx':
-        esm_model_mlx = ESM2MLX(num_layers=36, embed_dim=2560, attention_heads=40)
-        esm_state_dict_torch = esm_model.cpu().state_dict()
+    esm_model_mlx = ESM2MLX(num_layers=36, embed_dim=2560, attention_heads=40)
+    esm_state_dict_torch = esm_model.cpu().state_dict()
 
-        esm_state_dict_torch = {k: mx.array(v) for k, v in starmap(map_torch_to_mlx, esm_state_dict_torch.items()) if k is not None}
-        esm_model_mlx.update(tree_unflatten(list(esm_state_dict_torch.items())))
-        esm_model = esm_model_mlx
+    esm_state_dict_torch = {k: mx.array(v) for k, v in starmap(map_torch_to_mlx, esm_state_dict_torch.items()) if k is not None}
+    esm_model_mlx.update(tree_unflatten(list(esm_state_dict_torch.items())))
+    esm_model = esm_model_mlx
     print(f"pLM ESM-3B loaded with {args.backend} backend.")
 
     esm_model.eval()
@@ -225,7 +184,7 @@ def initialize_others(args, device):
         num_timesteps=args.num_steps,
         t_start=1e-4,
         tau=args.tau,
-        log_timesteps=True,
+        log_timesteps=not getattr(args, "no_log_timesteps", False),
         w_cutoff=0.99,
     )
     return tokenizer, featurizer, processor, flow, sampler
@@ -298,24 +257,31 @@ def predict_structures_from_fastas(args):
     # initialize models
     model, device = initialize_folding_model(args)
     plddt_latent_module, plddt_out_module = initialize_plddt_module(args, device)
-    esm_model, esm_dict, af2_to_esm = initialize_esm_model(args, device)
+    conditioner = None
+    esm_model = esm_dict = af2_to_esm = None
+    if args.backend == 'torch':
+        conditioner = Conditioner(cache, device, weights_dir=args.ckpt_dir)
+    else:
+        esm_model, esm_dict, af2_to_esm = initialize_esm_model(args, device)
 
     # initialize other components
     tokenizer, featurizer, processor, flow, sampler = initialize_others(args, device)
 
     # process fasta files to input format
-    download_fasta_utilities(cache)
+    ccd_dir = conditioner.weights_dir if conditioner else cache
+    download_fasta_utilities(ccd_dir)
     data = check_fasta_inputs(Path(args.fasta_path))
     if not data:
         raise ValueError("No valid input files found. Please check the input directory.")
     process_fastas(
         data=data,
         out_dir=output_dir,
-        ccd_path=cache / "ccd.pkl",
+        ccd_path=ccd_dir / "ccd.pkl",
     )
 
-    for struct_file in output_dir.glob("structures/*.npz"):
-        record_file = output_dir / "records" / f"{struct_file.stem}.json"
+    for processed in Manifest.load(output_dir / 'manifest.json').records:
+        struct_file = output_dir / 'structures' / f'{processed.id}.npz'
+        record_file = output_dir / 'records' / f'{processed.id}.json'
 
         # prepare the target protein data for inference
         batch, structure, record = process_one_inference_structure(
@@ -324,6 +290,8 @@ def predict_structures_from_fastas(args):
             esm_model, esm_dict, af2_to_esm,
         )
 
+        if conditioner is not None:
+            conditioner.add_embedding(batch)
         sampled_coord, pad_mask, plddts = generate_structure(
             args, batch, sampler, flow, processor,
             model, plddt_latent_module, plddt_out_module, device

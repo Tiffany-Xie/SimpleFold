@@ -23,10 +23,10 @@ import lightning.pytorch as pl
 from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
 from fairscale.nn.wrap import enable_wrap, wrap
 
+from simplefold.model.objective import flow_losses, smooth_lddt
 from utils.esm_utils import _af2_to_esm, esm_registry
 from boltz_data_pipeline.types import Record, Structure
 from utils.boltz_utils import (
-    weighted_rigid_align, 
     center_random_augmentation,
     process_structure, 
     save_structure
@@ -157,52 +157,8 @@ class SimpleFold(pl.LightningModule):
         coords_mask,
         t,
     ):
-        """Compute weighted alignment.
-
-        Parameters
-        ----------
-        pred_coords: torch.Tensor
-            The predicted atom coordinates
-        true_coords: torch.Tensor
-            The ground truth atom coordinates
-        coords_mask: torch.Tensor
-            The atoms mask
-
-        """
-        B, N, _ = true_coords.shape
-        true_dists = torch.cdist(true_coords, true_coords)
-
-        mask = (true_dists < self.lddt_cutoff).float()
-        mask = mask * (1 - torch.eye(pred_coords.shape[1], device=pred_coords.device))
-        mask = mask * (coords_mask.unsqueeze(-1) * coords_mask.unsqueeze(-2))
-
-        # Compute distances between all pairs of atoms
-        pred_dists = torch.cdist(pred_coords, pred_coords)
-        dist_diff = torch.abs(true_dists - pred_dists)
-
-        # Compute epsilon values
-        eps = (
-            (
-                (
-                    F.sigmoid(0.5 - dist_diff)
-                    + F.sigmoid(1.0 - dist_diff)
-                    + F.sigmoid(2.0 - dist_diff)
-                    + F.sigmoid(4.0 - dist_diff)
-                )
-                / 4.0
-            )
-        )
-
-        # Calculate masked averaging
-        num = (eps * mask).sum(dim=(-1, -2))
-        den = mask.sum(dim=(-1, -2)).clamp(min=1)
-        lddt = num / den
-        if self.lddt_weight_schedule:
-            t_weight = 1 + 8 * torch.relu(t - 0.5)
-            lddt = (1.0 - lddt) * t_weight
-            return lddt.mean()
-        else:
-            return (1.0 - lddt.mean()) * self.smooth_lddt_loss_weight
+        return smooth_lddt(pred_coords, true_coords, coords_mask, t, self.lddt_cutoff,
+                           self.smooth_lddt_loss_weight, self.lddt_weight_schedule)
 
     def plddt_loss(
         self,
@@ -392,83 +348,20 @@ class SimpleFold(pl.LightningModule):
 
         noise = torch.randn_like(batch['coords']).to(self.device)
 
-        _, y_t, v_t = self.path.interpolant(t, noise, batch["coords"])
+        _, y_t, _ = self.path.interpolant(t, noise, batch["coords"])
 
         out_dict = self.model(y_t, t, batch)
 
-        resolved_atom_mask = batch["atom_resolved_mask"].float()
-        align_weights = y_t.new_ones(y_t.shape[:2])
-
-        if self.use_rigid_align:
-            with torch.no_grad(), torch.autocast("cuda", enabled=False):
-                v_t = out_dict['predict_velocity'].detach().float()
-                denoised_coords = y_t + v_t * (1.0 - t[:, None, None])
-                coords = batch["coords"].detach().float()
-                coords_aligned = weighted_rigid_align(
-                    coords,
-                    denoised_coords.detach().float(),
-                    align_weights.detach().float(),
-                    mask=resolved_atom_mask.detach().float(),
-                )
-                _, _, v_t_aligned = self.path.interpolant(t, noise, coords_aligned)
-            target = v_t_aligned
-        else:
-            target = v_t
-
-        loss = F.mse_loss(out_dict['predict_velocity'], target, reduction='none')
-
-        loss_mask = resolved_atom_mask * align_weights
-        loss = self.loss_masking(loss, loss_mask)
-        loss = loss.mean()
-
-        self.log(
-            "loss/mse",
-            loss.item(),
-            on_epoch=True,
-            logger=True,
-            prog_bar=True,
-            rank_zero_only=True,
-        )
-
+        losses = flow_losses(batch, y_t, noise, out_dict['predict_velocity'], t,
+                             scale=self.processor.scale, path=self.path, rigid_align=self.use_rigid_align,
+                             lddt_cutoff=self.lddt_cutoff, lddt_weight=self.smooth_lddt_loss_weight,
+                             lddt_scheduled=self.lddt_weight_schedule)
+        loss = losses['native_loss']
+        self.log('loss/mse', losses['velocity_mse'].item(), on_epoch=True,
+                 logger=True, prog_bar=True, rank_zero_only=True)
         if self.use_smooth_lddt_loss:
-            # one-step Euler to get denoised coordinates
-            denoised_coords = y_t + \
-                out_dict['predict_velocity'] * (1.0 - t[:, None, None])
-
-            # rescale coordinates to angstroms
-            # denoised_coords = center_of_mass_norm(denoised_coords, batch['atom_pad_mask'])
-            # true_coords = center_of_mass_norm(batch['coords'], batch['atom_pad_mask'])
-            denoised_coords = center_random_augmentation(
-                denoised_coords,
-                batch['atom_pad_mask'],
-                augmentation=False,
-                centering=True,
-            )
-            true_coords = center_random_augmentation(
-                batch['coords'],
-                batch['atom_pad_mask'],
-                augmentation=False,
-                centering=True,
-            )
-            denoised_coords = denoised_coords * self.processor.scale
-            true_coords = true_coords * self.processor.scale
-
-            smooth_lddt_loss = self.smooth_lddt_loss(
-                denoised_coords,
-                true_coords,
-                resolved_atom_mask,
-                t,
-            )
-            loss += smooth_lddt_loss
-
-            self.log(
-                "loss/smooth_lddt",
-                smooth_lddt_loss.item(),
-                on_epoch=True,
-                logger=True,
-                prog_bar=True,
-                rank_zero_only=True,
-            )
+            self.log('loss/smooth_lddt', losses['smooth_lddt_loss'].item(), on_epoch=True,
+                     logger=True, prog_bar=True, rank_zero_only=True)
 
         self.log(
             "loss/loss",

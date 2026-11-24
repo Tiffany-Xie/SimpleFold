@@ -3,48 +3,24 @@
 # Copyright (c) 2025 Apple Inc. Licensed under MIT License.
 #
 
-import os
 import torch
-import hydra
-import omegaconf
 from pathlib import Path
-from itertools import starmap
 
-from model.flow import LinearPath
-from model.torch.sampler import EMSampler
+from simplefold.conditioning import Conditioner, load_esm
+from simplefold.inference import (
+    initialize_esm_model, initialize_folding_model, initialize_others, initialize_plddt_module,
+)
 
-from processor.protein_processor import ProteinDataProcessor
-from utils.datamodule_utils import process_one_inference_structure
-from utils.esm_utils import _af2_to_esm, esm_registry
-from utils.boltz_utils import process_structure, save_structure
-from utils.fasta_utils import process_fastas, download_fasta_utilities
-from boltz_data_pipeline.feature.featurizer import BoltzFeaturizer
-from boltz_data_pipeline.tokenize.boltz_protein import BoltzTokenizer
+from simplefold.utils.datamodule_utils import process_one_inference_structure
+from simplefold.utils.boltz_utils import process_structure, save_structure
+from simplefold.utils.fasta_utils import process_fastas, download_fasta_utilities
 
 try: 
     import mlx.core as mx
-    from mlx.utils import tree_unflatten, tree_flatten
-    from model.mlx.sampler import EMSampler as EMSamplerMLX
-    from model.mlx.esm_network import ESM2 as ESM2MLX
-    from utils.mlx_utils import map_torch_to_mlx, map_plddt_torch_to_mlx
     MLX_AVAILABLE = True
 except:
     MLX_AVAILABLE = False
     print("MLX not installed, skip importing MLX related packages.")
-
-
-ckpt_url_dict = {
-    "simplefold_100M": "https://ml-site.cdn-apple.com/models/simplefold/simplefold_100M.ckpt",
-    "simplefold_360M": "https://ml-site.cdn-apple.com/models/simplefold/simplefold_360M.ckpt",
-    "simplefold_700M": "https://ml-site.cdn-apple.com/models/simplefold/simplefold_700M.ckpt",
-    "simplefold_1.1B": "https://ml-site.cdn-apple.com/models/simplefold/simplefold_1.1B.ckpt",
-    "simplefold_1.6B": "https://ml-site.cdn-apple.com/models/simplefold/simplefold_1.6B.ckpt",
-    "simplefold_3B": "https://ml-site.cdn-apple.com/models/simplefold/simplefold_3B.ckpt",
-}
-
-plddt_ckpt_url = (
-    "https://ml-site.cdn-apple.com/models/simplefold/plddt_module_1.6B.ckpt"
-)
 
 
 class ModelWrapper:
@@ -76,124 +52,12 @@ class ModelWrapper:
         return device
 
     def from_pretrained_folding_model(self):
-        # define folding model
-        simplefold_model = self.simplefold_model
-
-        # create folding model
-        ckpt_path = os.path.join(self.ckpt_dir, f"{simplefold_model}.ckpt")
-        if not os.path.exists(ckpt_path):
-            os.system(f"curl -L -o {ckpt_path} {ckpt_url_dict[simplefold_model]}")
-
-        checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-
-        # load model checkpoint
-        cfg_path = os.path.join(
-            "configs/model/architecture", f"foldingdit_{simplefold_model[11:]}.yaml"
-        )
-        if self.backend == "torch":
-            model_config = omegaconf.OmegaConf.load(cfg_path)
-            model = hydra.utils.instantiate(model_config)
-            model.load_state_dict(checkpoint, strict=True)
-            model = model.to(self.device)
-        elif self.backend == "mlx":
-            # replace torch implementations with mlx
-            with open(cfg_path, "r") as f:
-                yaml_str = f.read()
-            yaml_str = yaml_str.replace("torch", "mlx")
-
-            model_config = omegaconf.OmegaConf.create(yaml_str)
-            model = hydra.utils.instantiate(model_config)
-            mlx_state_dict = {
-                k: mx.array(v)
-                for k, v in starmap(map_torch_to_mlx, checkpoint.items())
-                if k is not None
-            }
-            model.update(tree_unflatten(list(mlx_state_dict.items())))
-        print(f"Folding model {simplefold_model} loaded with {self.backend} backend.")
-
-        model.eval()
+        model, _ = initialize_folding_model(self)
         return model
 
     def from_pretrained_plddt_model(self):
-        if not self.plddt:
-            return {
-                "plddt_out_module": None,
-                "plddt_latent_module": None,
-            }
-
-        # load pLDDT module if specified
-        plddt_ckpt_path = os.path.join(self.ckpt_dir, "plddt.ckpt")
-        if not os.path.exists(plddt_ckpt_path):
-            os.system(f"curl -L -o {plddt_ckpt_path} {plddt_ckpt_url}")
-
-        plddt_module_path = "configs/model/architecture/plddt_module.yaml"
-        plddt_checkpoint = torch.load(
-            plddt_ckpt_path, map_location="cpu", weights_only=False
-        )
-
-        if self.backend == "torch":
-            plddt_config = omegaconf.OmegaConf.load(plddt_module_path)
-            plddt_out_module = hydra.utils.instantiate(plddt_config)
-            plddt_out_module.load_state_dict(plddt_checkpoint, strict=True)
-            plddt_out_module = plddt_out_module.to(self.device)
-        elif self.backend == "mlx":
-            # replace torch implementations with mlx
-            with open(plddt_module_path, "r") as f:
-                yaml_str = f.read()
-            yaml_str = yaml_str.replace("torch", "mlx")
-
-            plddt_config = omegaconf.OmegaConf.create(yaml_str)
-            plddt_out_module = hydra.utils.instantiate(plddt_config)
-
-            mlx_state_dict = {
-                k: mx.array(v)
-                for k, v in starmap(map_plddt_torch_to_mlx, plddt_checkpoint.items())
-                if k is not None
-            }
-            plddt_out_module.update(tree_unflatten(list(mlx_state_dict.items())))
-
-        plddt_out_module.eval()
-        print(f"pLDDT output module loaded with {self.backend} backend.")
-
-        plddt_latent_ckpt_path = os.path.join(self.ckpt_dir, "simplefold_1.6B.ckpt")
-        if not os.path.exists(plddt_latent_ckpt_path):
-            os.makedirs(self.ckpt_dir, exist_ok=True)
-            os.system(
-                f"curl -L -o {plddt_latent_ckpt_path} {ckpt_url_dict['simplefold_1.6B']}"
-            )
-
-        plddt_latent_config_path = "configs/model/architecture/foldingdit_1.6B.yaml"
-        plddt_latent_checkpoint = torch.load(
-            plddt_latent_ckpt_path, map_location="cpu", weights_only=False
-        )
-
-        if self.backend == "torch":
-            plddt_latent_config = omegaconf.OmegaConf.load(plddt_latent_config_path)
-            plddt_latent_module = hydra.utils.instantiate(plddt_latent_config)
-            plddt_latent_module.load_state_dict(plddt_latent_checkpoint, strict=True)
-            plddt_latent_module = plddt_latent_module.to(self.device)
-        elif self.backend == "mlx":
-            # replace torch implementations with mlx
-            with open(plddt_latent_config_path, "r") as f:
-                yaml_str = f.read()
-            yaml_str = yaml_str.replace("torch", "mlx")
-
-            plddt_latent_config = omegaconf.OmegaConf.create(yaml_str)
-            plddt_latent_module = hydra.utils.instantiate(plddt_latent_config)
-            mlx_state_dict = {
-                k: mx.array(v)
-                for k, v in starmap(map_torch_to_mlx, plddt_latent_checkpoint.items())
-                if k is not None
-            }
-            plddt_latent_module.update(tree_unflatten(list(mlx_state_dict.items())))
-
-        plddt_latent_module.eval()
-        print(f"pLDDT latent module loaded with {self.backend} backend.")
-
-        return {
-            "plddt_out_module": plddt_out_module,
-            "plddt_latent_module": plddt_latent_module,
-        }
+        latent, output = initialize_plddt_module(self, self.device)
+        return {'plddt_out_module': output, 'plddt_latent_module': latent}
 
 
 class InferenceWrapper:
@@ -237,66 +101,26 @@ class InferenceWrapper:
         self.work_dir = work_dir
         self.prediction_dir = prediction_dir
 
-        self.initialize_esm_model()
+        self.conditioner = Conditioner(cache, device) if self.backend == 'torch' else None
+        self.esm_model = self.esm_dict = self.af2_to_esm = None
+        if self.conditioner is None:
+            self.initialize_esm_model()
         self.initialize_others()
 
     def initialize_esm_model(self):
-        # load ESM2 model
-        esm_model, esm_dict = esm_registry["esm2_3B"]()
-        af2_to_esm = _af2_to_esm(esm_dict)
-
-        if self.backend == "torch":
-            esm_model = esm_model.to(self.device)
-            af2_to_esm = af2_to_esm.to(self.device)
-        elif self.backend == "mlx":
-            esm_model_mlx = ESM2MLX(num_layers=36, embed_dim=2560, attention_heads=40)
-            esm_state_dict_torch = esm_model.cpu().state_dict()
-
-            esm_state_dict_torch = {
-                k: mx.array(v)
-                for k, v in starmap(map_torch_to_mlx, esm_state_dict_torch.items())
-                if k is not None
-            }
-            esm_model_mlx.update(tree_unflatten(list(esm_state_dict_torch.items())))
-            esm_model = esm_model_mlx
-        print(f"pLM ESM-3B loaded with {self.backend} backend.")
-
-        self.esm_model = esm_model.eval()
-        self.esm_dict = esm_dict
-        self.af2_to_esm = af2_to_esm
+        if self.conditioner is None:
+            parts = initialize_esm_model(self, self.device)
+        else:
+            parts = load_esm(self.conditioner.weights_dir, self.device)
+        self.esm_model, self.esm_dict, self.af2_to_esm = parts
 
     def initialize_others(self):
-        # prepare data tokenizer, featurizer, and processor
-        self.tokenizer = BoltzTokenizer()
-        self.featurizer = BoltzFeaturizer()
-        self.processor = ProteinDataProcessor(
-            device=self.device,
-            scale=16.0,
-            ref_scale=5.0,
-            multiplicity=1,
-            inference_multiplicity=self.nsample_per_protein,
-            backend=self.backend,
-        )
-
-        # define flow process and sampler
-        self.flow = LinearPath()
-
-        if self.backend == "torch":
-            sampler_cls = EMSampler
-        elif self.backend == "mlx":
-            sampler_cls = EMSamplerMLX
-
-        self.sampler = sampler_cls(
-            num_timesteps=self.num_steps,
-            t_start=1e-4,
-            tau=self.tau,
-            log_timesteps=True,
-            w_cutoff=0.99,
-        )
+        self.tokenizer, self.featurizer, self.processor, self.flow, self.sampler = initialize_others(self, self.device)
 
     def process_input(self, aa_seq):
         # process fasta files to input format
-        download_fasta_utilities(self.cache)
+        ccd_dir = self.conditioner.weights_dir if self.conditioner else self.cache
+        download_fasta_utilities(ccd_dir)
         # save the input sequence to a fasta file
         with open(self.work_dir / "input.fasta", "w") as f:
             f.write(f">A|Protein\n{aa_seq}\n")
@@ -304,7 +128,7 @@ class InferenceWrapper:
         process_fastas(
             data=data,
             out_dir=self.work_dir,
-            ccd_path=self.cache / "ccd.pkl",
+            ccd_path=ccd_dir / "ccd.pkl",
         )
 
         # prepare the target protein data for inference
@@ -320,6 +144,8 @@ class InferenceWrapper:
             self.esm_dict,
             self.af2_to_esm,
         )
+        if self.conditioner is not None:
+            self.conditioner.add_embedding(batch)
         return batch, structure, record
 
     def run_inference(self, batch, model, plddt_model, device):

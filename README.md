@@ -15,6 +15,10 @@ This github repository accompanies the research paper, [*SimpleFold: Folding Pro
 </div>
 
 
+## PyTorch research API
+
+The `protTok` branch tracks the [Apple reference at 94e2cd7](https://github.com/apple-aiml-research/ml-simplefold/tree/94e2cd704cf7b86ef8e7cb27a1e77154c4e35b34). `simplefold.assets.load_model` loads an official release by scale. `simplefold.conditioning.Conditioner` builds single-chain features with cached ESM-2 layers. `simplefold.denoising.one_step` accepts an explicit padded noise tensor and `t` from 0 (noise) to 1 (data). `simplefold.denoising.sample(..., trajectory=True)` records each model input, velocity, clean estimate and solver state. Coordinate fields ending in `_angstrom` use Å. Experimental coordinates and their observation mask are supplied by the caller for one-step diagnostics.
+
 ## Introduction
 
 We introduce SimpleFold, the first flow-matching based protein folding model that solely uses general purpose transformer layers. SimpleFold does not rely on expensive modules like triangle attention or pair representation biases, and is trained via a generative flow-matching objective. We scale SimpleFold to 3B parameters and train it on more than 8.6M distilled protein structures together with experimental PDB data. To the best of our knowledge, SimpleFold is the largest scale folding model ever developed. On standard folding benchmarks, SimpleFold-3B model achieves competitive performance compared to state-of-the-art baselines. Due to its generative training objective, SimpleFold also demonstrates strong performance in ensemble prediction. SimpleFold challenges the reliance on complex domain-specific architectures designs in folding, highlighting an alternative yet important avenue of progress in protein structure prediction.

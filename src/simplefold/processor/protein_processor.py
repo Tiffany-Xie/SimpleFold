@@ -5,26 +5,30 @@
 
 import torch
 import numpy as np
-from utils.esm_utils import (
+from simplefold.utils.esm_utils import (
     af2_idx_to_esm_idx,
     compute_language_model_representations,
     batch_encode_sequences,
 )
-from utils.boltz_utils import center_random_augmentation as torch_center_random
+from simplefold.utils.boltz_utils import center_random_augmentation as torch_center_random
 
 try:
     import mlx.core as mx
-    from utils.mlx_utils import center_random_augmentation as mlx_center_random
+    from simplefold.utils.mlx_utils import center_random_augmentation as mlx_center_random
 except:
     pass
+
+
+COORD_SCALE = 16.0
+REF_SCALE = 5.0
 
 
 class ProteinDataProcessor:
     def __init__(
         self, 
         device, 
-        scale=16.0, 
-        ref_scale=5.0, 
+        scale=COORD_SCALE,
+        ref_scale=REF_SCALE,
         multiplicity=1,
         inference_multiplicity=1,
         backend="torch",

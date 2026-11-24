@@ -6,7 +6,8 @@
 import torch
 from tqdm import tqdm
 from einops import repeat
-from utils.boltz_utils import center_random_augmentation
+from simplefold.model.objective import clean_prediction
+from simplefold.utils.boltz_utils import center_random_augmentation
 
 
 class EMSampler():
@@ -52,10 +53,12 @@ class EMSampler():
         y, 
         t, 
         t_next, 
-        batch, 
+        batch,
+        generator=None,
+        record_step=None,
     ):
         dt = t_next - t
-        eps = torch.randn_like(y).to(y)
+        eps = torch.randn(y.shape, dtype=y.dtype, device=y.device, generator=generator)
 
         y = center_random_augmentation(
             y,
@@ -77,10 +80,12 @@ class EMSampler():
         mean_y = y + drift * dt
         y_sample = mean_y + torch.sqrt(2.0 * dt * diff_coeff * self.tau) * eps
 
+        if record_step is not None:
+            record_step(t, t_next, y, velocity, clean_prediction(y, velocity, batched_t), y_sample)
         return y_sample
 
     @torch.no_grad()
-    def sample(self, model_fn, flow, noise, batch):
+    def sample(self, model_fn, flow, noise, batch, *, generator=None, record_step=None, progress=True):
         sampling_timesteps = self.num_timesteps
         steps = self.steps.to(noise.device)
         y_sampled = noise
@@ -90,6 +95,7 @@ class EMSampler():
             range(sampling_timesteps),
             desc="Sampling",
             total=sampling_timesteps,
+            disable=not progress,
         ):
             t = steps[i]
             t_next = steps[i + 1]
@@ -101,6 +107,8 @@ class EMSampler():
                 t,
                 t_next,
                 feats,
+                generator=generator,
+                record_step=record_step,
             )
 
         return {

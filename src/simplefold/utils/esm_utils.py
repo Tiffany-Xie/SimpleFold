@@ -11,7 +11,7 @@ import typing as T
 import numpy as np
 from functools import partial
 
-from utils import residue_constants
+from simplefold.utils import residue_constants
 
 try:
     import mlx.core as mx

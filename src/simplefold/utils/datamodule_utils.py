@@ -11,13 +11,13 @@ from typing import Optional
 from dataclasses import dataclass
 from pathlib import Path
 
-from boltz_data_pipeline.feature.pad import pad_to_max
-from boltz_data_pipeline.crop.cropper import Cropper
-from boltz_data_pipeline.tokenize.boltz_protein import BoltzTokenizer
-from boltz_data_pipeline.feature.featurizer import BoltzFeaturizer
-from processor.protein_processor import ProteinDataProcessor
-from boltz_data_pipeline.types import Connection, Input, Manifest, Record, Structure
-from boltz_data_pipeline import const
+from simplefold.boltz_data_pipeline.feature.pad import pad_to_max
+from simplefold.boltz_data_pipeline.crop.cropper import Cropper
+from simplefold.boltz_data_pipeline.tokenize.boltz_protein import BoltzTokenizer
+from simplefold.boltz_data_pipeline.feature.featurizer import BoltzFeaturizer
+from simplefold.processor.protein_processor import ProteinDataProcessor
+from simplefold.boltz_data_pipeline.types import Connection, Input, Manifest, Record, Structure
+from simplefold.boltz_data_pipeline import const
 
 
 restype_1to3 = {
@@ -187,8 +187,22 @@ def process_one_inference_structure(
     af2_to_esm=None,
 ):
     structure: Structure = Structure.load(structure_path)
+    with open(record_path) as handle:
+        record = json.load(handle)
+    batch = featurize_structure(structure, record, tokenizer, featurizer)
+    batch = processor.preprocess_inference(
+        batch,
+        esm_model=esm_model,
+        esm_dict=esm_dict,
+        af2_to_esm=af2_to_esm,
+    )
+
+    return batch, structure, Record(**record)
+
+
+def featurize_structure(structure, record, tokenizer, featurizer):
+    """Shared in-memory input for the file CLI and sequence-conditioned diagnostics."""
     input_data = Input(structure, {})
-    record = json.load(open(record_path))
 
     tokenized = tokenizer.tokenize(input_data)
     sequence = extract_sequence_from_tokens(tokenized)
@@ -200,13 +214,4 @@ def process_one_inference_structure(
     features['max_num_tokens'] = torch.tensor(len(tokenized.tokens), dtype=torch.long)
     features['cropped_num_tokens'] = torch.tensor(len(tokenized.tokens), dtype=torch.long)
 
-    batch = collate([features])
-
-    batch = processor.preprocess_inference(
-        batch,
-        esm_model=esm_model,
-        esm_dict=esm_dict,
-        af2_to_esm=af2_to_esm,
-    )
-
-    return batch, structure, Record(**record)
+    return collate([features])
