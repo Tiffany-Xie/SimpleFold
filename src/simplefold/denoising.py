@@ -34,29 +34,46 @@ def one_step(model, batch, t, noise, *, stage='finetune'):
 
 
 @torch.no_grad()
-def sample(model, batch, *, seed=42, steps=500, tau=0.1, trajectory=False):
-    """Official log-time SDE. A trajectory includes the centered input seen at every evaluation."""
+def sample(model, batch, *, seed=42, steps=500, tau=0.1, trajectory=False, snapshot_times=None):
+    """Official log-time SDE, optionally recording full trajectories or nearest-time snapshots."""
     if steps < 1 or tau < 0:
         raise ValueError('Expected positive steps and nonnegative tau')
     coords = batch['coords']
     generator = torch.Generator(device=coords.device).manual_seed(seed)
     noise = torch.randn(coords.shape, dtype=coords.dtype, device=coords.device, generator=generator)
     sampler = EMSampler(num_timesteps=steps, t_start=1e-4, tau=tau, log_timesteps=True, w_cutoff=0.99)
+    selected = []
+    if snapshot_times is not None:
+        if trajectory or not len(snapshot_times) or any(not 0 <= t < 1 for t in snapshot_times):
+            raise ValueError('Specify snapshot times in [0,1) or request a full trajectory')
+        selected = sorted({int((sampler.steps[:-1] - t).abs().argmin()) for t in snapshot_times})
     states, inputs, predictions, velocities = [], [], [], []
     if trajectory:
         states.append((COORD_SCALE * noise).cpu())
 
+    step = 0
+    state = noise
+
     def record(t, t_next, model_input, velocity, pred, next_state):
-        inputs.append((model_input * COORD_SCALE).cpu())
-        predictions.append((pred * COORD_SCALE).cpu())
-        velocities.append(velocity.cpu())
-        states.append((next_state * COORD_SCALE).cpu())
+        nonlocal step, state
+        if trajectory or step in selected:
+            inputs.append((model_input * COORD_SCALE).cpu())
+            predictions.append((pred * COORD_SCALE).cpu())
+            states.append(((next_state if trajectory else state) * COORD_SCALE).cpu())
+            if trajectory:
+                velocities.append(velocity.cpu())
+        step += 1
+        state = next_state
 
     out = sampler.sample(model, LinearPath(), noise, batch, generator=generator,
-                         record_step=record if trajectory else None, progress=False)
+                         record_step=record if trajectory or selected else None, progress=False)
     final = center_random_augmentation(out['denoised_coords'], batch['atom_pad_mask'], augmentation=False)
     result = {'final_angstrom': final * COORD_SCALE, 'times': sampler.steps, 'tau': tau, 'seed': seed}
     if trajectory:
         result.update(states_angstrom=torch.stack(states), inputs_angstrom=torch.stack(inputs),
                       predictions_angstrom=torch.stack(predictions), velocities=torch.stack(velocities))
+    elif selected:
+        result.update(snapshot_indices=torch.tensor(selected), snapshot_times=sampler.steps[selected],
+                      states_angstrom=torch.stack(states), inputs_angstrom=torch.stack(inputs),
+                      predictions_angstrom=torch.stack(predictions))
     return result
